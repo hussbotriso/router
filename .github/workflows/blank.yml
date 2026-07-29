@@ -1,36 +1,263 @@
-# This is a basic workflow to help you get started with Actions
+generate the project one layer at a time:You are a senior Android engineer. Generate a complete, compilable Android Studio project that builds into a ready-to-install APK.
 
-name: CI
+HARD REQUIREMENTS
+- Output the full source code, Gradle files, manifest, resources, and any XML/config needed.
+- The project must compile without TODOs, placeholders, or missing symbols.
+- Double-check for build errors, missing imports, type mismatches, and runtime null issues before outputting.
+- Prefer a working MVP over fancy architecture, but keep the code clean and maintainable.
+- Do not invent unsupported router features. If a feature cannot be automated on the detected router, degrade gracefully and show a clear UI message.
 
-# Controls when the workflow will run
-on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+APP PURPOSE
+Build a local-only Android app for managing a home router and its connected devices.
+The app’s main function is simple:
+- show connected devices
+- let the user toggle each device ON/OFF
+- OFF means block internet access for that device while keeping Wi-Fi connection if the router supports it
+- ON means restore internet access
+- optionally apply per-device speed limits if the router supports QoS/Bandwidth Control
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+TARGET ROUTER CONTEXT
+Design for an older TP-LINK ADSL2+ modem/router with admin IP 192.168.1.1 and legacy web UI pages like:
+- Status
+- Access Management
+- Filter
+- ACL
+- IP/MAC Filter
+- Wireless
+- Interface Setup
+- Advanced Setup
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
-jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+From the router UI context:
+- it may support IP/MAC filtering
+- it may support ACL or similar blacklist behavior
+- it may not support modern APIs
+- some firmware may not have parental control or access control menus
+- speed limiting may or may not exist depending on firmware
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+FUNCTIONAL REQUIREMENTS
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+1) DEVICE LIST SCREEN
+- Show all known devices as cards in a scrollable list
+- Each card shows:
+  - display name
+  - MAC address
+  - IP address if available
+  - current state: Allowed, Blocked, or Limited
+  - a large switch
+- Green state = Allowed
+- Red state = Blocked
+- Amber state = Limited
+- The switch must be large and obvious
+- Toggling the switch immediately updates the UI and triggers the router action
+- Show loading progress while an action is being applied
+- Show success/failure feedback per device
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+2) DEVICE DETAIL SCREEN
+- Rename device locally
+- Edit MAC address
+- Edit IP address
+- Choose block method
+- Choose speed limit preset
+- Save locally
+- Show the exact router rule being applied when possible
+
+3) ROUTER CONTROL LOGIC
+Implement a modular router engine with this priority order:
+
+Mode A: Full router automation
+- Log into the router admin interface using HTTP form submission if possible
+- Maintain cookies/session state
+- Detect and reuse CSRF tokens or hidden form fields if present
+- Read router HTML pages and infer form actions and inputs when necessary
+- Support legacy TP-LINK-like pages
+- Add/remove rules for:
+  - IP/MAC filter blacklist
+  - ACL blacklist
+  - IP filtering
+  - firewall rules if exposed in firmware
+- Prefer MAC-based blocking when supported
+- Fall back to IP-based blocking if only IP filters exist
+- Support speed limits only if a real QoS/Bandwidth Control page exists
+
+Mode B: Assisted manual mode
+- If router automation is unavailable or partially supported, the app must still be useful
+- Show exact step-by-step rule values the user must enter manually in the router web UI
+- Provide one-tap copy values for MAC, IP, subnet mask, port, protocol, direction, and rule type
+- Show the correct menu path for the detected router when possible
+- Never crash if automation fails
+
+Mode C: Local profile manager
+- If the router cannot be controlled directly, the app still stores device profiles and generates clear instructions
+- The app must continue to function as a device control dashboard even if it cannot fully automate the router
+
+BLOCK / UNBLOCK BEHAVIOR
+The app must support the preferred behavior:
+- Block internet only
+- Keep Wi-Fi connected if the router allows it
+- If the only available method disconnects Wi-Fi too, label that clearly and do not misrepresent it
+
+Preferred methods in order:
+1. IP/MAC blacklist or filter
+2. ACL blacklist
+3. IP filtering / firewall blocking
+4. DNS blocking only if nothing else is available
+5. MAC filtering only as a last resort, clearly marked as “disconnects from Wi-Fi too”
+
+SPEED LIMIT REQUIREMENTS
+If the router supports bandwidth control or QoS:
+- allow download/upload limits per device
+- allow presets:
+  - Full speed
+  - Light limit
+  - Heavy limit
+- convert Mbps to kbps correctly
+- show limits clearly
+- if per-device QoS is not available, show “not supported by this router”
+
+DEVICE DISCOVERY
+Support multiple discovery paths:
+- manual add device
+- import device list from router HTML page if possible
+- optional local network scan only if it can be done safely and reliably on Android without root
+- cache discovered devices locally
+- identify devices primarily by MAC address
+
+AUTHENTICATION
+- Ask once for router username and password
+- store credentials only in encrypted local storage
+- never send credentials anywhere except the router itself
+- support session timeout and re-login
+- handle wrong password, router offline, and expired session gracefully
+
+TECH STACK
+Use:
+- Kotlin
+- Jetpack Compose
+- MVVM
+- Coroutines
+- OkHttp / Retrofit only if appropriate for the router login and page submission flow
+- DataStore or Room for local device profiles
+- Encrypted SharedPreferences or encrypted DataStore for credentials
+- No cloud backend
+- No root access
+- No VPN dependency
+- No paid SDKs
+
+ANDROID REQUIREMENTS
+- targetSdk 34
+- minSdk 26 or lower only if strictly needed
+- include cleartext traffic support for 192.168.1.1 because the router uses HTTP
+- include network security config for local router access
+- request only the permissions genuinely needed
+
+UI REQUIREMENTS
+Design the app to be extremely simple:
+- Home screen with device cards and switches
+- Bottom actions:
+  - Refresh
+  - Add device
+  - Router settings
+  - Logs
+- Router settings screen:
+  - router IP
+  - username
+  - password
+  - save/test connection button
+- Logs screen:
+  - timestamp
+  - device
+  - action
+  - result
+  - error
+- Use clear typography
+- Use large touch targets
+- Avoid clutter
+- Show loading indicators, confirmations, and errors clearly
+
+ARCHITECTURE REQUIREMENTS
+Create a modular structure with these layers:
+- ui
+- viewmodel
+- domain
+- data
+- router
+- storage
+
+Define a RouterClient interface with methods like:
+- login()
+- fetchDevices()
+- blockDeviceByMac()
+- unblockDeviceByMac()
+- blockDeviceByIp()
+- unblockDeviceByIp()
+- setDeviceSpeedLimit()
+- detectSupportedFeatures()
+
+Create a TpLinkLegacyRouterClient implementation that:
+- loads router pages
+- parses forms and hidden fields
+- submits changes
+- can operate against older TP-LINK-style HTML interfaces
+- falls back cleanly if a feature is unsupported
+
+DATA MODEL
+Each device should have:
+- id
+- displayName
+- macAddress
+- ipAddress
+- isBlocked
+- isLimited
+- speedLimitDownKbps
+- speedLimitUpKbps
+- blockMethod
+- lastSeen
+- notes
+
+ACCEPTANCE CRITERIA
+The project is complete only if:
+- it compiles successfully
+- it generates an APK
+- it shows connected devices
+- each device has a working on/off switch
+- blocked means internet blocked, not just UI state
+- speed limits work when the router supports them
+- unsupported features fail gracefully
+- device profiles persist locally
+- credentials are stored locally and securely
+- the app does not require any cloud service
+
+IMPLEMENTATION NOTES
+- Use a repository pattern for router and storage actions
+- Use sealed classes for UI state and result handling
+- Use clear error messages instead of generic failures
+- Include retry handling for router session expiry
+- Avoid excessive dependencies
+- Keep code readable and production-oriented
+
+OUTPUT FORMAT
+Return the complete project in a form that can be copied into Android Studio directly.
+Include:
+- settings.gradle
+- root build.gradle / build.gradle.kts
+- app module build file
+- AndroidManifest.xml
+- network security config
+- all Kotlin source files
+- all Compose UI code
+- storage code
+- router client code
+- any resources needed
+
+QUALITY GATE
+Before outputting, verify:
+- imports resolve
+- package names match
+- all referenced classes exist
+- Gradle configuration is coherent
+- no placeholder methods remain
+- no syntax errors
+- no fake unsupported APIs are used
+- the app is internally consistent
+
+Build the app as a real, usable APK project for a TP-LINK legacy router management tool with device on/off toggles and optional speed limiting.
